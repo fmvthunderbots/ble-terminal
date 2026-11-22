@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f6feb">
+<title>BLE Terminal</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #f4f6f8; --panel: #ffffff; --text: #1b1f24; --muted: #5b6672; --border: #d6dbe1;
+    --accent: #1f6feb; --out: #1f6feb; --outText: #ffffff; --in: #e6e9ee; --inText: #1b1f24;
+    --ok: #2e7d32; --okBg: #e3f4e5; --warn: #9a4d00; --warnBg: #fff3e0; --err: #c62828; --errBg: #fdecea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1317; --panel: #171c22; --text: #e6e9ee; --muted: #98a2ad; --border: #2c343d;
+      --in: #252c34; --inText: #e6e9ee; --okBg: #16301a; --warnBg: #3a2a12; --warn: #ffb74d; --errBg: #3a1717; --err: #ef9a9a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+  }
+  header {
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  h1 { font-size: 17px; margin: 0 auto 0 0; }
+  .durum { font-size: 14px; padding: 4px 10px; border-radius: 999px; background: var(--in); color: var(--muted); }
+  .durum.bagli { background: var(--okBg); color: var(--ok); }
+  .durum.uyari { background: var(--warnBg); color: var(--warn); }
+  .durum.hata { background: var(--errBg); color: var(--err); }
+  button {
+    font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text); cursor: pointer;
+  }
+  button.ana { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  [hidden] { display: none !important; }
+  #uyari { background: var(--warnBg); color: var(--warn); padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  main { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .bos { color: var(--muted); text-align: center; margin: auto; }
+  .balon { max-width: 80%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .balon.giden { align-self: flex-end; background: var(--out); color: var(--outText); border-bottom-right-radius: 4px; }
+  .balon.gelen { align-self: flex-start; background: var(--in); color: var(--inText); border-bottom-left-radius: 4px; }
+  .balon.basarisiz { outline: 2px solid var(--err); }
+  .balon .saat { display: block; font-size: 11px; opacity: .75; margin-top: 2px; text-align: right; }
+  details { background: var(--panel); border-top: 1px solid var(--border); }
+  summary { padding: 8px 16px; cursor: pointer; color: var(--muted); font-size: 14px; }
+  .ayiklama { padding: 0 16px 10px; }
+  .sayaclar { font: 13px/1.5 ui-monospace, Consolas, monospace; margin-bottom: 6px; white-space: pre; overflow-x: auto; }
+  .sahte-araclar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 14px; }
+  #gunluk {
+    margin: 0; max-height: 30vh; overflow-y: auto; font: 12px/1.45 ui-monospace, Consolas, monospace;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap;
+  }
+  #gunluk .h { color: var(--err); }
+  form {
+    display: flex; gap: 8px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    background: var(--panel); border-top: 1px solid var(--border);
+  }
+  textarea {
+    flex: 1; font: inherit; resize: none; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); height: 42px; max-height: 120px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>BLE Terminal</h1>
+  <span id="durum" class="durum">Bağlı değil</span>
+  <button id="baglanBtn" class="ana" type="button">Bağlan</button>
+  <button id="yenidenBtn" type="button" hidden>Yeniden bağlan</button>
+  <button id="sahteBtn" type="button">Sahte mod: kapalı</button>
+</header>
+<div id="uyari" hidden></div>
+
+<main id="liste">
+  <p class="bos" id="bos">Henüz veri yok. Bağlanın ve bir satır gönderin.</p>
+</main>
+
+<details id="ayiklamaPanel">
+  <summary>Hata ayıklama</summary>
+  <div class="ayiklama">
+    <div class="sayaclar" id="sayaclar"></div>
+    <div class="sahte-araclar" id="sahteAraclar" hidden>
+      <button id="sahteKopBtn" type="button">Sahte kopma</button>
+      <label><input type="checkbox" id="sahteBasarisiz"> Yeniden bağlanma başarısız olsun</label>
+    </div>
+    <pre id="gunluk"></pre>
+  </div>
+</details>
+
+<form id="form">
+  <textarea id="kutu" placeholder="Veri yazın" title="Enter: gönder, Shift+Enter: yeni satır" rows="1"></textarea>
+  <button id="gonderBtn" class="ana" type="submit" disabled>Gönder</button>
+</form>
+
+<script>
+'use strict';
+
+// ---------- Protokol sabitleri (PROTOKOL.md ile aynı) ----------
+const SERVIS_UUID = '7a1c3e52-4b8d-4f6a-9c21-5d0e8b3a1f77';
+const RX_UUID = '7a1c3e53-4b8d-4f6a-9c21-5d0e8b3a1f77'; // istemci -> sunucu, WRITE
+const TX_UUID = '7a1c3e54-4b8d-4f6a-9c21-5d0e8b3a1f77'; // sunucu -> istemci, NOTIFY
+const PARCA_BOYUTU = 20;          // varsayılan ATT MTU 23 - 3
+const AZAMI_GOVDE = 16384;        // JSON gövdesi için üst sınır (bayt)
+const PING_ARALIGI = 15000;       // ms
+const AZAMI_KAYIP_PING = 3;
+const DENEME_SURELERI = [2000, 4000, 8000]; // otomatik yeniden bağlanma beklemeleri
+
+const kodlayici = new TextEncoder();
+const cozucu = new TextDecoder('utf-8', { fatal: true });
+
+// ---------- Çerçeve: 4 bayt uzunluk (big-endian) + UTF-8 JSON ----------
+function cerceveOlustur(nesne) {
+  const govde = kodlayici.encode(JSON.stringify(nesne));
+  if (govde.length > AZAMI_GOVDE) {
+    throw new Error('Satır çok uzun (' + govde.length + ' bayt, sınır ' + AZAMI_GOVDE + ')');
+  }
+  const cerceve = new Uint8Array(4 + govde.length);
+  new DataView(cerceve.buffer).setUint32(0, govde.length, false);
+  cerceve.set(govde, 4);
+  return cerceve;
+}
+
+function parcala(cerceve) {
+  const parcalar = [];
+  for (let i = 0; i < cerceve.length; i += PARCA_BOYUTU) {
+    parcalar.push(cerceve.slice(i, i + PARCA_BOYUTU)); // slice: her parça kendi kopyası
+  }
+  return parcalar;
+}
+
+function birlestir(a, b) {
+  const c = new Uint8Array(a.length + b.length);
+  c.set(a, 0);
+  c.set(b, a.length);
+  return c;
+}
+
+// Gelen parçaları tamponlar, uzunluk dolunca çerçeveyi çözer.
+class Birlestirici {
+  constructor(cerceveGeldi, hataOldu) {
+    this.cerceveGeldi = cerceveGeldi;
+    this.hataOldu = hataOldu;
+    this.tampon = new Uint8Array(0);
+  }
+  sifirla() { this.tampon = new Uint8Array(0); }
+  ekle(parca) {
+    this.tampon = birlestir(this.tampon, parca);
+    while (this.tampon.length >= 4) {
+      const dv = new DataView(this.tampon.buffer, this.tampon.byteOffset, this.tampon.byteLength);
+      const n = dv.getUint32(0, false);
+      if (n > AZAMI_GOVDE) {
+        this.hataOldu('Bozuk çerçeve: uzunluk ' + n + ' > ' + AZAMI_GOVDE + ', tampon sıfırlandı');
+        this.sifirla();
+        return;
+      }
+      if (this.tampon.length < 4 + n) return; // çerçeve henüz tamamlanmadı
+      const govde = this.tampon.slice(4, 4 + n);
+      this.tampon = this.tampon.slice(4 + n);
+      let nesne;
+      try {
+        nesne = JSON.parse(cozucu.decode(govde));
+      } catch (e) {
+        this.hataOldu('JSON çözülemedi: ' + e.message);
+        continue;
+      }
+      this.cerceveGeldi(nesne, 4 + n);
+    }
+  }
+}
+
+function uuidUret() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+}
+
+const uyku = ms => new Promise(r => setTimeout(r, ms));
+
+// ---------- Taşıyıcı 1: gerçek Web Bluetooth ----------
+class BleTasiyici {
+  constructor() {
+    this.cihaz = null;
+    this.rx = null;
+    this.tx = null;
+    this.parcaGeldi = null;
+    this.koptu = null;
+    this._degerDinleyici = (olay) => {
+      const v = olay.target.value; // DataView
+      this.parcaGeldi(new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength)));
+    };
+  }
+  async cihazSec() {
+    this.cihaz = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVIS_UUID] }] });
+    this.cihaz.addEventListener('gattserverdisconnected', () => this.koptu && this.koptu());
+    gunluk('Cihaz seçildi: ' + (this.cihaz.name || '(adsız)'));
+  }
+  async baglan() {
+    const sunucu = await this.cihaz.gatt.connect();
+    gunluk('GATT bağlandı');
+    const servis = await sunucu.getPrimaryService(SERVIS_UUID);
+    this.rx = await servis.getCharacteristic(RX_UUID);
+    if (this.tx) this.tx.removeEventListener('characteristicvaluechanged', this._degerDinleyici);
+    this.tx = await servis.getCharacteristic(TX_UUID);
+    this.tx.addEventListener('characteristicvaluechanged', this._degerDinleyici);
+    await this.tx.startNotifications();
+    gunluk('TX bildirimleri açıldı');
+    if (!this.rx.writeValueWithResponse) gunluk('writeValueWithResponse yok, writeValue kullanılacak');
+  }
+  async parcaYaz(parca) {
+    // Bluefy gibi eski uygulamalarda writeValueWithResponse olmayabilir.
+    if (this.rx.writeValueWithResponse) await this.rx.writeValueWithResponse(parca);
+    else await this.rx.writeValue(parca);
+  }
+  bagliMi() { return !!(this.cihaz && this.cihaz.gatt.connected); }
+  kes() { if (this.bagliMi()) this.cihaz.gatt.disconnect(); }
+  ad() { return (this.cihaz && this.cihaz.name) || 'BLE-TERM'; }
+}
+
+// ---------- Taşıyıcı 2: sahte mod (BLE'siz, Android sunucuyu taklit eder) ----------
+// Aynı çerçeveleme/parçalama yolundan geçer, böylece birleştirme de sınanır.
+class SahteTasiyici {
+  constructor() {
+    this.bagli = false;
+    this.parcaGeldi = null;
+    this.koptu = null;
+    this.sunucuTarafi = new Birlestirici((n) => this._sunucuCerceve(n), (h) => hataYaz('Sahte sunucu: ' + h));
+  }
+  async cihazSec() { gunluk('Sahte cihaz seçildi: BLE-TERM'); }
+  async baglan() {
+    await uyku(400);
+    if (document.getElementById('sahteBasarisiz').checked) throw new Error('Sahte: bağlantı reddedildi');
+    this.sunucuTarafi.sifirla();
+    this.bagli = true;
+    gunluk('Sahte GATT bağlandı, TX bildirimleri açıldı');
+  }
+  async parcaYaz(parca) {
+    if (!this.bagli) throw new Error('Sahte: bağlı değil');
+    await uyku(10); // yazma onayı gecikmesi
+    this.sunucuTarafi.ekle(parca);
+  }
+  bagliMi() { return this.bagli; }
+  kes() {
+    if (!this.bagli) return;
+    this.bagli = false;
+    setTimeout(() => this.koptu && this.koptu(), 0);
+  }
+  ad() { return 'BLE-TERM (sahte)'; }
+  _sunucuCerceve(nesne) {
+    if (nesne.type === 'ping') this._sunucuGonder({ type: 'pong' });
+    else if (nesne.type === 'msg') {
+      setTimeout(() => this._sunucuGonder({ type: 'msg', id: uuidUret(), ts: Date.now(), text: 'Yankı: ' + nesne.text }), 500);
+    }
+  }
+  _sunucuGonder(nesne) {
+    parcala(cerceveOlustur(nesne)).forEach((p, i) => {
+      setTimeout(() => { if (this.bagli) this.parcaGeldi(p); }, 5 * i);
+    });
+  }
+}
+
+// ---------- Uygulama durumu ----------
+const el = (id) => document.getElementById(id);
+let tasiyici = null;
+let sahteMod = new URLSearchParams(location.search).has('sahte');
+let durumAdi = 'hazir';     // hazir | baglaniyor | bagli | deneniyor | basarisiz | kesildi
+let kullaniciKesti = false;
+let denemeNo = 0;
+let pingZamanlayici = null;
+let kayipPing = 0;
+let gonderimZinciri = Promise.resolve(); // satırların parçaları birbirine karışmasın
+const gorulenIdler = new Set();
+const sayac = { gidenParca: 0, gidenBayt: 0, gelenParca: 0, gelenBayt: 0, gidenSatir: 0, gelenSatir: 0, hata: 0 };
+
+const birlestirici = new Birlestirici(cerceveGeldi, (h) => hataYaz(h));
+
+// ---------- Günlük ve sayaçlar ----------
+function zaman() { return new Date().toLocaleTimeString('tr-TR', { hour12: false }); }
+function gunlukSatiri(metin, hata) {
+  const g = el('gunluk');
+  const s = document.createElement('div');
+  if (hata) s.className = 'h';
+  s.textContent = zaman() + '  ' + metin;
+  g.appendChild(s);
+  while (g.childNodes.length > 300) g.removeChild(g.firstChild);
+  g.scrollTop = g.scrollHeight;
+}
+function gunluk(metin) { gunlukSatiri(metin, false); }
+function hataYaz(metin) { sayac.hata++; gunlukSatiri('HATA: ' + metin, true); sayaclariGoster(); }
+function sayaclariGoster() {
+  el('sayaclar').textContent =
+    'Giden: ' + sayac.gidenSatir + ' satır, ' + sayac.gidenParca + ' parça, ' + sayac.gidenBayt + ' bayt\n' +
+    'Gelen: ' + sayac.gelenSatir + ' satır, ' + sayac.gelenParca + ' parça, ' + sayac.gelenBayt + ' bayt\n' +
+    'Hata: ' + sayac.hata + '   Yanıtsız ping: ' + kayipPing;
+}
+
+// ---------- Durum etiketi ve düğmeler ----------
+function durumGoster(ad, ek) {
+  durumAdi = ad;
+  const d = el('durum');
+  const metinler = {
+    hazir: ['Bağlı değil', ''],
+    baglaniyor: ['Bağlanıyor…', 'uyari'],
+    bagli: ['Bağlı: ' + (tasiyici ? tasiyici.ad() : ''), 'bagli'],
+    deneniyor: ['Bağlantı koptu, yeniden deneniyor (' + ek + '/3)', 'uyari'],
+    basarisiz: ['Bağlantı koptu', 'hata'],
+    kesildi: ['Bağlantı kesildi', ''],
+  };
+  d.textContent = metinler[ad][0];
+  d.className = 'durum ' + metinler[ad][1];
+  const bluetoothYok = !sahteMod && !navigator.bluetooth;
+  el('baglanBtn').textContent = (ad === 'bagli') ? 'Bağlantıyı kes' : 'Bağlan';
+  el('baglanBtn').disabled = bluetoothYok || ad === 'baglaniyor' || ad === 'deneniyor';
+  el('yenidenBtn').hidden = !(ad === 'basarisiz' && tasiyici);
+  el('sahteBtn').disabled = ad === 'bagli' || ad === 'baglaniyor' || ad === 'deneniyor';
+  el('gonderBtn').disabled = ad !== 'bagli';
+}
+
+function uyariGuncelle() {
+  const u = el('uyari');
+  if (sahteMod) {
+    u.hidden = false;
+    u.textContent = 'Sahte mod açık: Bluetooth kullanılmıyor, karşı taraf taklit ediliyor.';
+  } else if (!navigator.bluetooth) {
+    u.hidden = false;
+    u.textContent = 'Bu tarayıcı Bluetooth desteklemiyor, iPad\'de Bluefy kullanın.' +
+      (window.isSecureContext ? '' : ' (Sayfa HTTPS veya localhost üzerinden açılmalı.)');
+  } else {
+    u.hidden = true;
+    if (navigator.bluetooth.getAvailability) {
+      navigator.bluetooth.getAvailability().then((acik) => {
+        if (!acik && !sahteMod) { u.hidden = false; u.textContent = 'Bluetooth kapalı veya bu cihazda Bluetooth adaptörü yok.'; }
+      }).catch(() => {});
+    }
+  }
+  el('sahteBtn').textContent = 'Sahte mod: ' + (sahteMod ? 'açık' : 'kapalı');
+  el('sahteAraclar').hidden = !sahteMod;
+}
+
+// ---------- Bağlantı akışı ----------
+function tasiyiciKur(t) {
+  t.parcaGeldi = parcaGeldi;
+  t.koptu = kopmaOldu;
+  tasiyici = t;
+}
+
+async function baglanDugmesi() {
+  if (durumAdi === 'bagli') {
+    kullaniciKesti = true;
+    gunluk('Kullanıcı bağlantıyı kesti');
+    tasiyici.kes();
+    kopmaOldu();
+    return;
+  }
+  kullaniciKesti = false;
+  denemeNo = 0;
+  try {
+    tasiyiciKur(sahteMod ? new SahteTasiyici() : new BleTasiyici());
+    await tasiyici.cihazSec(); // kullanıcı hareketi içinde çağrılmalı
+  } catch (e) {
+    if (e.name === 'NotFoundError') gunluk('Cihaz seçimi iptal edildi');
+    else hataYaz('Cihaz seçilemedi: ' + e.message);
+    tasiyici = null;
+    durumGoster('hazir');
+    return;
+  }
+  try {
+    await baglantiKur();
+  } catch (e) {
+    hataYaz('Bağlanamadı: ' + e.message);
+    otomatikDene();
+  }
+}
+
+async function baglantiKur() {
+  durumGoster('baglaniyor');
+  birlestirici.sifirla();
+  try {
+    await tasiyici.baglan();
+  } catch (e) {
+    tasiyici.kes(); // yarım kalan bağlantıyı kapat
+    throw e;
+  }
+  denemeNo = 0;
+  kayipPing = 0;
+  durumGoster('bagli');
+  pingBaslat();
+}
+
+function kopmaOldu() {
+  if (durumAdi !== 'bagli') return; // bağlanma sırasında kopma: hata yolu ele alır
+  pingDurdur();
+  birlestirici.sifirla();
+  if (kullaniciKesti) { durumGoster('kesildi'); return; }
+  gunluk('Bağlantı koptu');
+  otomatikDene();
+}
+
+async function otomatikDene() {
+  if (kullaniciKesti) return;
+  if (denemeNo >= DENEME_SURELERI.length) {
+    gunluk('Otomatik denemeler bitti');
+    durumGoster('basarisiz');
+    return;
+  }
+  const bekle = DENEME_SURELERI[denemeNo];
+  denemeNo++;
+  durumGoster('deneniyor', denemeNo);
+  gunluk('Yeniden bağlanma denemesi ' + denemeNo + '/3, ' + (bekle / 1000) + ' sn sonra');
+  await uyku(bekle);
+  if (kullaniciKesti) return;
+  try {
+    await baglantiKur();
+    gunluk('Yeniden bağlandı');
+  } catch (e) {
+    hataYaz('Deneme ' + denemeNo + ' başarısız: ' + e.message);
+    otomatikDene();
+  }
+}
+
+async function yenidenDugmesi() {
+  kullaniciKesti = false;
+  denemeNo = 0;
+  try {
+    await baglantiKur();
+  } catch (e) {
+    hataYaz('Bağlanamadı: ' + e.message);
+    otomatikDene();
+  }
+}
+
+// ---------- Ping/pong ----------
+function pingBaslat() {
+  pingDurdur();
+  pingZamanlayici = setInterval(() => {
+    if (kayipPing >= AZAMI_KAYIP_PING) {
+      hataYaz(AZAMI_KAYIP_PING + ' ping yanıtsız, bağlantı koptu sayılıyor');
+      tasiyici.kes();
+      kopmaOldu();
+      return;
+    }
+    kayipPing++;
+    sayaclariGoster();
+    cerceveGonder({ type: 'ping' }).catch((e) => hataYaz('Ping gönderilemedi: ' + e.message));
+  }, PING_ARALIGI);
+}
+function pingDurdur() {
+  if (pingZamanlayici) clearInterval(pingZamanlayici);
+  pingZamanlayici = null;
+}
+
+// ---------- Gönderme ----------
+function cerceveGonder(nesne) {
+  const cerceve = cerceveOlustur(nesne);
+  const parcalar = parcala(cerceve);
+  const is = gonderimZinciri.then(async () => {
+    if (!tasiyici || !tasiyici.bagliMi()) throw new Error('Bağlı değil');
+    for (const p of parcalar) {
+      await tasiyici.parcaYaz(p);
+      sayac.gidenParca++;
+      sayac.gidenBayt += p.length;
+    }
+    sayaclariGoster();
+    gunluk('Gönderildi: ' + nesne.type + ', ' + cerceve.length + ' bayt, ' + parcalar.length + ' parça');
+  });
+  gonderimZinciri = is.catch(() => {});
+  return is;
+}
+
+async function satirGonder() {
+  const kutu = el('kutu');
+  const metin = kutu.value.trim();
+  if (!metin || durumAdi !== 'bagli') return;
+  const satir = { type: 'msg', id: uuidUret(), ts: Date.now(), text: metin };
+  try {
+    cerceveOlustur(satir);
+  } catch (e) {
+    hataYaz(e.message);
+    alert(e.message);
+    return;
+  }
+  kutu.value = '';
+  gorulenIdler.add(satir.id);
+  const balon = balonEkle(satir, 'giden');
+  try {
+    await cerceveGonder(satir);
+    sayac.gidenSatir++;
+    sayaclariGoster();
+  } catch (e) {
+    balon.classList.add('basarisiz');
+    balon.querySelector('.saat').textContent += ' · gönderilemedi';
+    hataYaz('Gönderilemedi: ' + e.message);
+  }
+}
+
+// ---------- Alma ----------
+function parcaGeldi(parca) {
+  sayac.gelenParca++;
+  sayac.gelenBayt += parca.length;
+  birlestirici.ekle(parca);
+  sayaclariGoster();
+}
+
+function cerceveGeldi(nesne, boyut) {
+  if (!nesne || typeof nesne.type !== 'string') { hataYaz('Türsüz çerçeve'); return; }
+  gunluk('Alındı: ' + nesne.type + ', ' + boyut + ' bayt');
+  if (nesne.type === 'ping') {
+    cerceveGonder({ type: 'pong' }).catch((e) => hataYaz('Pong gönderilemedi: ' + e.message));
+  } else if (nesne.type === 'pong') {
+    kayipPing = 0;
+    sayaclariGoster();
+  } else if (nesne.type === 'msg') {
+    if (typeof nesne.id !== 'string' || typeof nesne.text !== 'string') { hataYaz('Geçersiz msg çerçevesi'); return; }
+    if (gorulenIdler.has(nesne.id)) { gunluk('Tekrar gelen satır atlandı: ' + nesne.id); return; }
+    gorulenIdler.add(nesne.id);
+    sayac.gelenSatir++;
+    balonEkle(nesne, 'gelen');
+  } else {
+    hataYaz('Bilinmeyen tür: ' + nesne.type);
+  }
+}
+
+// ---------- Arayüz ----------
+function balonEkle(satir, yon) {
+  const bos = el('bos');
+  if (bos) bos.remove();
+  const b = document.createElement('div');
+  b.className = 'balon ' + yon;
+  b.textContent = satir.text; // textContent: HTML yorumlanmaz
+  const s = document.createElement('span');
+  s.className = 'saat';
+  const ts = typeof satir.ts === 'number' ? satir.ts : Date.now();
+  s.textContent = new Date(ts).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  b.appendChild(s);
+  const liste = el('liste');
+  liste.appendChild(b);
+  liste.scrollTop = liste.scrollHeight;
+  return b;
+}
+
+// ---------- Öz sınama: çerçeve + parçalama + birleştirme ----------
+function ozSinama() {
+  const ornek = { type: 'msg', id: 't1', ts: 1, text: 'Merhaba ğüşıöç İ 😀 ' + 'x'.repeat(60) };
+  const c1 = cerceveOlustur(ornek);
+  const c2 = cerceveOlustur({ type: 'ping' });
+  const parcalar = parcala(c1);
+  if (!parcalar.every(p => p.length <= PARCA_BOYUTU)) throw new Error('parça > 20 bayt');
+  if (parcalar.reduce((t, p) => t + p.length, 0) !== c1.length) throw new Error('parça toplamı yanlış');
+  const sonuc = [];
+  const b = new Birlestirici(n => sonuc.push(n), h => { throw new Error(h); });
+  const hepsi = birlestir(c1, c2);
+  for (let i = 0, k = 1; i < hepsi.length; i += k, k = k % 7 + 1) b.ekle(hepsi.slice(i, i + k)); // düzensiz parça boyları
+  if (sonuc.length !== 2 || sonuc[0].text !== ornek.text || sonuc[1].type !== 'ping' || b.tampon.length !== 0) {
+    throw new Error('birleştirme sonucu yanlış');
+  }
+  let bozukYakalandi = false;
+  const b2 = new Birlestirici(() => {}, () => { bozukYakalandi = true; });
+  b2.ekle(new Uint8Array([0xff, 0xff, 0xff, 0xff]));
+  if (!bozukYakalandi || b2.tampon.length !== 0) throw new Error('bozuk uzunluk yakalanmadı');
+}
+
+// ---------- Başlangıç ----------
+el('baglanBtn').addEventListener('click', baglanDugmesi);
+el('yenidenBtn').addEventListener('click', yenidenDugmesi);
+el('sahteBtn').addEventListener('click', () => {
+  sahteMod = !sahteMod;
+  tasiyici = null;
+  gunluk('Sahte mod ' + (sahteMod ? 'açıldı' : 'kapandı'));
+  uyariGuncelle();
+  durumGoster('hazir');
+});
+el('sahteKopBtn').addEventListener('click', () => {
+  if (tasiyici instanceof SahteTasiyici && tasiyici.bagliMi()) { gunluk('Sahte kopma tetiklendi'); tasiyici.kes(); }
+});
+el('form').addEventListener('submit', (e) => { e.preventDefault(); satirGonder(); });
+el('kutu').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); satirGonder(); }
+});
+
+uyariGuncelle();
+durumGoster('hazir');
+sayaclariGoster();
+try { ozSinama(); gunluk('Öz sınama geçti (çerçeve, parçalama, birleştirme)'); }
+catch (e) { hataYaz('Öz sınama başarısız: ' + e.message); }
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js')
+    .then(() => gunluk('Service worker kayıtlı (çevrimdışı açılış hazır)'))
+    .catch((e) => hataYaz('Service worker kaydedilemedi: ' + e.message));
+} else {
+  gunluk('Service worker desteklenmiyor: sayfa internetsiz açılmayabilir');
+}
+</script>
+</body>
+</html>
